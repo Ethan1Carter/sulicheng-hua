@@ -22,7 +22,8 @@ from task_generator.prompts_raw import (
     _code_font_size,
     _code_disable,
     _code_limit,
-    _prompt_manim_cheatsheet
+    _prompt_manim_cheatsheet,
+    _code_common_errors
 )
 from src.rag.vector_store import RAGVectorStore # Import RAGVectorStore
 
@@ -334,6 +335,27 @@ class CodeGenerator:
         )
         return code, response_text
 
+    def _focus_error(self, error: str, max_chars: int = 4000) -> str:
+        """Trim a noisy manim stderr dump down to the most relevant part.
+
+        Manim prints progress bars, deprecation warnings and a full traceback to
+        stderr. When the whole blob is fed to the fixer model it buries the real
+        exception. We keep the tail (where the traceback + final error line live)
+        and, if a Python traceback is present, start from the last "Traceback"
+        marker so the model sees the exception cleanly.
+        """
+        if not error:
+            return error
+        text = error.strip()
+        # Prefer the last traceback block if one exists.
+        idx = text.rfind("Traceback (most recent call last)")
+        if idx != -1:
+            text = text[idx:]
+        # Cap the length, keeping the tail (the final error line is what matters).
+        if len(text) > max_chars:
+            text = "...[earlier output trimmed]...\n" + text[-max_chars:]
+        return text
+
     def fix_code_errors(self, implementation_plan: str, code: str, error: str, scene_trace_id: str, topic: str, scene_number: int, session_id: str, rag_queries_cache: Dict = None) -> str:
         """Fix errors in generated Manim code.
 
@@ -350,8 +372,13 @@ class CodeGenerator:
         Returns:
             Tuple[str, str]: Fixed code and response text
         """
+        # Manim dumps a long traceback + progress noise to stderr. Trim it down to
+        # the last, most relevant chunk so the fixer model focuses on the actual
+        # exception instead of the surrounding render logs.
+        error = self._focus_error(error)
+
         # Format error fix prompt
-        prompt = get_prompt_fix_error(implementation_plan=implementation_plan, manim_code=code, error=error)
+        prompt = get_prompt_fix_error(implementation_plan=implementation_plan, manim_code=code, error=error, additional_context=_code_common_errors)
 
         if self.use_rag:
             # Generate RAG queries for error fixing
@@ -371,7 +398,7 @@ class CodeGenerator:
                 scene_number=scene_number
             )
             # Format the retrieved documents into a string
-            prompt = get_prompt_fix_error(implementation_plan=implementation_plan, manim_code=code, error=error, additional_context=retrieved_docs)
+            prompt = get_prompt_fix_error(implementation_plan=implementation_plan, manim_code=code, error=error, additional_context=[_code_common_errors, retrieved_docs])
 
         # Get fixed code from model
         response_text = self.scene_model(

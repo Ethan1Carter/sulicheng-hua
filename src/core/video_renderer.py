@@ -14,6 +14,45 @@ from src.core.parse_video import (
 from mllm_tools.vertex_ai import VertexAIWrapper
 from mllm_tools.gemini import GeminiWrapper
 
+# Manim render quality flag. Defaults to the upstream "-qh" (1080p60); set
+# TEA_MANIM_QUALITY=-ql / -qm locally for faster draft renders.
+MANIM_QUALITY = os.environ.get("TEA_MANIM_QUALITY", "-qh")
+
+# Manim stores each render under a folder named after the quality preset.
+MANIM_QUALITY_DIRS = {
+    "-ql": "480p15",
+    "-qm": "720p30",
+    "-qh": "1080p60",
+    "-qk": "2160p60",
+}
+
+# Matches CJK characters so subtitle re-wrapping only kicks in for Chinese text.
+_CJK_RE = re.compile(r"[一-鿿㐀-䶿]")
+
+
+def _rewrap_subtitle_text(raw_lines, max_chars: int = 20) -> str:
+    """Re-wrap one subtitle block's text lines.
+
+    English subtitles are returned untouched (upstream behaviour). Chinese has
+    almost no spaces, so manim_voiceover's space-based 70-char wrap collapses a
+    whole caption onto one over-long line; for CJK we re-wrap by character count,
+    breaking preferentially right after punctuation.
+    """
+    if not any(_CJK_RE.search(line) for line in raw_lines):
+        return "".join(raw_lines)  # leave non-CJK subtitles exactly as-is
+
+    text = re.sub(r"\s+", "", "".join(line.strip() for line in raw_lines))
+    breaks = set("，。！？；：、,.!?;:")
+    wrapped, current = [], ""
+    for ch in text:
+        current += ch
+        if ch in breaks or len(current) >= max_chars:
+            wrapped.append(current)
+            current = ""
+    if current:
+        wrapped.append(current)
+    return "\n".join(wrapped) + "\n"
+
 class VideoRenderer:
     """Class for rendering and combining Manim animation videos."""
 
@@ -29,7 +68,7 @@ class VideoRenderer:
         self.print_response = print_response
         self.use_visual_fix_code = use_visual_fix_code
 
-    async def render_scene(self, code: str, file_prefix: str, curr_scene: int, curr_version: int, code_dir: str, media_dir: str, max_retries: int = 3, use_visual_fix_code=False, visual_self_reflection_func=None, banned_reasonings=None, scene_trace_id=None, topic=None, session_id=None):
+    async def render_scene(self, code: str, file_prefix: str, curr_scene: int, curr_version: int, code_dir: str, media_dir: str, max_retries: int = 3, use_visual_fix_code=False, visual_self_reflection_func=None, banned_reasonings=None, scene_trace_id=None, topic=None, session_id=None, scene_model=None):
         """Render a single scene and handle error retries and visual fixes.
 
         Args:
@@ -57,7 +96,7 @@ class VideoRenderer:
                 file_path = os.path.join(code_dir, f"{file_prefix}_scene{curr_scene}_v{curr_version}.py")
                 result = await asyncio.to_thread(
                     subprocess.run,
-                    ["manim", "-qh", file_path, "--media_dir", media_dir, "--progress_bar", "none"],
+                    ["manim", MANIM_QUALITY, file_path, "--media_dir", media_dir, "--progress_bar", "none"],
                     capture_output=True,
                     text=True
                 )
@@ -76,7 +115,8 @@ class VideoRenderer:
                     )
                     
                     # For Gemini/Vertex AI models, pass the video directly
-                    if self.scene_model.model_name.startswith(('gemini/', 'vertex_ai/')):
+                    model_name = getattr(scene_model, "model_name", "") or ""
+                    if model_name.startswith(('gemini/', 'vertex_ai/')):
                         media_input = video_path
                     else:
                         # For other models, use image snapshot
@@ -154,7 +194,7 @@ class VideoRenderer:
                 try:
                     media_dir = os.path.join(self.output_dir, file_prefix, "media")
                     result = subprocess.run(
-                        f"manim -qh {file_path} --media_dir {media_dir}",
+                        f"manim {MANIM_QUALITY} {file_path} --media_dir {media_dir}",
                         shell=True,
                         capture_output=True,
                         text=True
@@ -256,14 +296,33 @@ class VideoRenderer:
             folders.sort(key=lambda f: int(f.split("_v")[-1]))
             folder = folders[-1]
 
+            # Manim renders into a quality-named subfolder (e.g. "1080p60" for -qh,
+            # "720p30" for -qm). Resolve it dynamically instead of assuming 1080p60.
+            quality_dir = None
+            preferred_dir = os.path.join(folder, MANIM_QUALITY_DIRS.get(MANIM_QUALITY, ""))
+            if os.path.isdir(preferred_dir):
+                quality_dir = preferred_dir
+            else:
+                for entry in sorted(os.listdir(folder)):
+                    candidate = os.path.join(folder, entry)
+                    if os.path.isdir(candidate) and any(
+                        f.endswith('.mp4') for f in os.listdir(candidate)
+                    ):
+                        quality_dir = candidate
+                        break
+
+            if quality_dir is None:
+                print(f"Warning: Missing rendered media folder for scene {scene_num}")
+                continue
+
             video_found = False
             subtitles_found = False
-            for filename in os.listdir(os.path.join(folder, "1080p60")):
+            for filename in os.listdir(quality_dir):
                 if filename.endswith('.mp4'):
-                    scene_videos.append(os.path.join(folder, "1080p60", filename))
+                    scene_videos.append(os.path.join(quality_dir, filename))
                     video_found = True
                 elif filename.endswith('.srt'):
-                    scene_subtitles.append(os.path.join(folder, "1080p60", filename))
+                    scene_subtitles.append(os.path.join(quality_dir, filename))
                     subtitles_found = True
 
             if not video_found:
@@ -325,9 +384,11 @@ class VideoRenderer:
                                   'x264-params': 'aq-mode=0:no-deblock:no-cabac:ref=1:subme=0:trellis=0:weightp=0',  # Added aggressive speed optimizations
                                   'movflags': '+faststart',
                                   'stats': None,
-                                  'progress': 'pipe:1'})
-                        .overwrite_output()
-                        .run_async(pipe_stdout=True, pipe_stderr=True)
+                                 'progress': 'pipe:1'})
+                       .overwrite_output()
+                        # stderr stays inherited: piping it without draining it
+                        # deadlocks ffmpeg as soon as the pipe buffer fills up.
+                        .run_async(pipe_stdout=True, pipe_stderr=False)
                     )
                     
                     # Process progress output
@@ -363,9 +424,11 @@ class VideoRenderer:
                                   'preset': 'medium',
                                   'crf': '23',
                                   'stats': None,  # Enable progress stats
-                                  'progress': 'pipe:1'})  # Output progress to pipe
+                                 'progress': 'pipe:1'})  # Output progress to pipe
                         .overwrite_output()
-                        .run_async(pipe_stdout=True, pipe_stderr=True)
+                        # stderr stays inherited: piping it without draining it
+                        # deadlocks ffmpeg as soon as the pipe buffer fills up.
+                        .run_async(pipe_stdout=True, pipe_stderr=False)
                     )
                     
                     # Process progress output
@@ -426,10 +489,13 @@ class VideoRenderer:
                                     outfile.write(f"{new_start} --> {new_end}\n")
                                     i += 1
 
-                                    # Subtitle text (could be multiple lines)
+                                    # Subtitle text (could be multiple lines).
+                                    # Collect the block, then re-wrap CJK text.
+                                    text_lines = []
                                     while i < len(lines) and lines[i].strip():
-                                        outfile.write(lines[i])
+                                        text_lines.append(lines[i])
                                         i += 1
+                                    outfile.write(_rewrap_subtitle_text(text_lines))
                                     outfile.write('\n')
                                 else:
                                     i += 1

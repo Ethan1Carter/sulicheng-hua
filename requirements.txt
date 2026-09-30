@@ -23,6 +23,7 @@ idna~=3.10
 isosurfaces~=0.1.2
 manim~=0.18.1
 manim-voiceover~=0.3.7
+edge-tts>=7.2.0 # free Microsoft neural TTS used for Chinese narration (no API key, needs network; <7.0 fails the token handshake with HTTP 403)
 ManimPango~=0.6.0 # sudo apt-get install libsdl-pango-dev    if you dont have pangocairo
 mapbox_earcut~=1.0.2
 markdown-it-py~=3.0.0

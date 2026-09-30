@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>溯理成画 · AI 定理讲解视频生成系统</title>
+<link rel="icon" type="image/png" href="/static/logo.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <img src="/static/logo.png" class="logo" alt="溯理成画 logo" />
+    <div>
+      <h1>溯理成画</h1>
+      <p>AI 定理讲解视频生成系统 —— 把一个定理，自动变成一段带讲解的动画视频</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div id="env-chips" class="chips"></div>
+    <button id="settings-btn" class="ghost-btn" type="button">设置</button>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="column-left">
+    <form id="job-form" class="card">
+      <h2>新建生成任务</h2>
+      <label class="field">
+        <span>示例定理（一键填充）</span>
+        <select id="example-picker">
+          <option value="">— 自己输入 —</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>定理 / 主题</span>
+        <input id="topic" name="topic" type="text" required
+               placeholder="例如 The Pythagorean Theorem" value="The Pythagorean Theorem" />
+        <small id="topic-hint">讲解语言选「中文」时，旁白、字幕与画面中的标题/标签均为中文，纯数学公式保持标准 LaTeX。</small>
+      </label>
+
+      <label class="field">
+        <span>一句话背景（可选）</span>
+        <textarea id="context" name="context" rows="3"
+          placeholder="例如：A fundamental relation in Euclidean geometry among the three sides of a right triangle">A fundamental relation in Euclidean geometry among the three sides of a right triangle</textarea>
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span>讲解语言</span>
+          <select id="language">
+            <option value="zh" selected>中文（旁白+字幕）</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>生成模型</span>
+          <select id="model"></select>
+        </label>
+      </div>
+
+      <div class="field-row">
+        <label class="field">
+          <span>画质</span>
+          <select id="quality"></select>
+        </label>
+        <label class="field">
+          <span>出错重试次数</span>
+          <input id="max_retries" type="number" min="1" max="8" value="3" />
+        </label>
+      </div>
+
+      <div class="field-row">
+        <label class="field checkbox">
+          <input id="only_plan" type="checkbox" />
+          <span>只生成分镜脚本（快速试跑）</span>
+        </label>
+      </div>
+
+      <button id="submit-btn" class="primary-btn" type="submit">开始生成</button>
+      <p class="hint" id="form-hint">一次生成通常需要 5–20 分钟（取决于分镜数量与画质）。</p>
+    </form>
+
+    <div class="card history">
+      <div class="card-head">
+        <h2>历史任务</h2>
+        <button id="refresh-btn" class="ghost-btn small" type="button">刷新</button>
+      </div>
+      <ul id="job-list" class="job-list"></ul>
+    </div>
+  </section>
+
+  <section class="column-right">
+    <div class="card empty" id="empty-state">
+      <h2>还没有选中的任务</h2>
+      <p>在左侧填一个定理，点「开始生成」。生成过程中可以实时看到分镜进度和运行日志，完成后可直接播放或下载视频。</p>
+    </div>
+
+    <div id="job-view" class="job-view hidden">
+      <div class="card job-head">
+        <div class="job-title">
+          <h2 id="view-topic">—</h2>
+          <span id="view-badge" class="badge">—</span>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress"><div id="view-progress" class="progress-bar"></div></div>
+          <div class="progress-meta">
+            <span id="view-stage">—</span>
+            <span id="view-percent">0%</span>
+          </div>
+        </div>
+        <div class="job-actions">
+          <button id="cancel-btn" class="ghost-btn" type="button">取消任务</button>
+          <button id="retry-btn" class="ghost-btn hidden" type="button">重试失败的分镜</button>
+          <button id="delete-btn" class="ghost-btn danger" type="button">移除记录</button>
+          <a id="view-download" class="ghost-btn hidden" download>下载视频</a>
+        </div>
+        <p id="view-error" class="error-text hidden"></p>
+      </div>
+
+      <div class="card player-card">
+        <div class="player-head">
+          <h3 id="player-title">成片</h3>
+          <span id="player-note" class="muted"></span>
+        </div>
+        <video id="player" controls playsinline preload="metadata"></video>
+        <p id="player-placeholder" class="muted">视频生成完成后会出现在这里。</p>
+        <div id="scene-strip" class="scene-strip"></div>
+      </div>
+
+      <div class="card log-card">
+        <div class="card-head">
+          <h3>运行日志</h3>
+          <label class="checkbox small"><input id="autoscroll" type="checkbox" checked /><span>自动滚动</span></label>
+        </div>
+        <pre id="log" class="log"></pre>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="settings-modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2>设置</h2>
+      <button id="settings-close" class="ghost-btn small" type="button">关闭</button>
+    </div>
+    <p class="muted">密钥保存在项目根目录的 <code>.env</code> 里，只在本机使用。留空表示不修改。</p>
+    <label class="field"><span>DeepSeek API Key</span><input id="key-deepseek" type="password" placeholder="sk-..." /></label>
+    <label class="field"><span>OpenAI API Key</span><input id="key-openai" type="password" placeholder="sk-..." /></label>
+    <label class="field"><span>Gemini API Key</span><input id="key-gemini" type="password" placeholder="AIza..." /></label>
+    <label class="field"><span>添加可用模型</span>
+      <input id="new-model" type="text" placeholder="例如 openai/gpt-4o 或 gemini/gemini-2.0-flash-001" />
+      <small>模型名按 LiteLLM 的写法，加进来之后就能在下拉框里选。</small>
+    </label>
+    <button id="settings-save" class="primary-btn" type="button">保存设置</button>
+    <p id="settings-status" class="muted"></p>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

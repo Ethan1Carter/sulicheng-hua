@@ -24,7 +24,41 @@ from .prompts_raw import (
     _prompt_rag_query_generation_fix_error
 )
 from typing import Union, List
-  
+import os
+
+
+# Appended to narration-authoring prompts when TEA_NARRATION_LANG requests
+# Chinese. The spoken narration switches to Chinese, and on-screen text is now
+# ALSO allowed to be Chinese: in Chinese mode we configure Manim's global Tex
+# template to a CJK-capable one (xelatex + ctex) via src.utils.tts_service, so
+# Chinese titles/labels render correctly.
+_ZH_NARRATION_DIRECTIVE = """
+
+[LANGUAGE — IMPORTANT]
+Write ALL narration / voiceover text (the strings that will be spoken and turned
+into subtitles) in fluent Simplified Chinese (简体中文), in the tone of an engaging
+lecturer.
+
+On-screen text MAY ALSO be in Simplified Chinese: titles, axis labels, diagram
+labels and short explanatory text can be written in Chinese inside `Tex` (and,
+if needed, inside `MathTex` using `\\text{...}`). A CJK-capable LaTeX template is
+configured automatically for you, so Chinese `Tex`/`MathTex` renders correctly —
+you do NOT need to set up any TexTemplate for Chinese yourself.
+
+Keep mathematical notation and formulas as standard LaTeX (symbols, operators,
+equations are language-neutral — do not translate them). Prefer `Tex` for Chinese
+prose/labels and `MathTex` for pure mathematics. Do NOT create an empty
+`TexTemplate()` that would override the configured CJK template.
+"""
+
+
+def _narration_language_suffix() -> str:
+    """Return a language directive to append to narration prompts, if any."""
+    if os.getenv("TEA_NARRATION_LANG", "en").strip().lower().startswith("zh"):
+        return _ZH_NARRATION_DIRECTIVE
+    return ""
+
+
 def get_prompt_scene_plan(topic: str, description: str) -> str:
     """
     Generate a prompt for scene planning based on the given parameters.
@@ -77,6 +111,7 @@ def get_prompt_scene_animation_narration(scene_number: int, topic: str, descript
         technical_implementation_plan=technical_implementation_plan,
         relevant_plugins=", ".join(relevant_plugins)
     )
+    prompt += _narration_language_suffix()
     return prompt
 
 def get_prompt_code_generation(topic: str,
@@ -105,6 +140,7 @@ def get_prompt_code_generation(topic: str,
         scene_implementation=scene_implementation,
         scene_number=scene_number
     )
+    prompt += _narration_language_suffix()
     if additional_context is not None:
         if isinstance(additional_context, str):
             prompt += f"\nAdditional context: {additional_context}"

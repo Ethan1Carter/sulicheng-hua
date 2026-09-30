@@ -1,0 +1,68 @@
+# COMMON MANIM MISTAKES TO AVOID (Manim Community v0.18.x)
+
+The following are frequent API errors that break rendering. The code you write
+MUST NOT contain any of these. Prefer the "USE" form on the right.
+
+## Renamed / removed animations and methods
+- `ShowCreation(mobj)`            -> USE `Create(mobj)`   (ShowCreation was removed)
+- `ShowCreationThenDestruction`   -> USE `ShowPassingFlash` or a `Create` then `Uncreate`
+- `DrawBorderThenFill` is fine, but `ShowCreationThenFadeOut` is gone -> compose manually
+- `mobj.get_center_of_mass()`     -> USE `mobj.get_center()`
+- `TextMobject(...)`              -> USE `Tex(...)`      (ManimGL name, not CE)
+- `TexMobject(...)`               -> USE `MathTex(...)`  (ManimGL name, not CE)
+- `Rectangle(color=..., fill_color=...)` extra kwargs -> set fill with `.set_fill(color, opacity=...)`
+
+## Axes / graphs (this is the #1 source of failures)
+- `axes.get_graph(func)`          -> USE `axes.plot(func)`
+- `axes.get_graph_label`          -> USE `axes.get_graph_label` still exists, but the graph
+                                     arg must come from `axes.plot(...)`, not `get_graph`.
+- `axes.get_riemann_rectangles(graph, dx=...)` needs a `plot`-produced graph.
+- `axes.input_to_graph_point(x, graph)` needs a `plot`-produced graph.
+- `NumberPlane`/`Axes` do NOT accept `x_min`/`x_max`; USE `x_range=[min, max, step]`
+  and `y_range=[min, max, step]`.
+- `ax.coords_to_point(...)` / `ax.c2p(...)` is correct; do NOT use `ax.coord_to_point`.
+
+## Positioning / layout
+- `mobj.to_edge(UP, buff=...)` is fine; do NOT call `mobj.to_corner(UP)` (needs a
+  corner like `UP+LEFT`).
+- Never hardcode coordinates that push objects off a 14.22 x 8.0 unit frame.
+  Keep everything within roughly x in [-7, 7], y in [-4, 4]. Use `.next_to`,
+  `.arrange`, `.to_edge`, `.move_to(ORIGIN)` for safe placement.
+- `VGroup(...).arrange(DOWN, buff=0.5)` to stack; do NOT manually shift each item.
+- Avoid overlap: after building a group, `.scale_to_fit_width`/`.scale` it down if
+  it may exceed the frame.
+
+## Text / LaTeX
+- Inside `MathTex`/`Tex`, escape backslashes properly in Python strings: use raw
+  strings `r"\frac{a}{b}"`.
+- Language of on-screen text follows the narration language directive: in English
+  mode keep all on-screen text English; in Chinese mode Chinese titles/labels are
+  allowed because a CJK-capable LaTeX template (xelatex + ctex) is configured for
+  you automatically — you do NOT need to build a TexTemplate for Chinese, and you
+  must NOT override it with an empty `TexTemplate()`.
+- Keep mathematical notation as standard LaTeX in both languages (symbols and
+  formulas are language-neutral). Prefer `Tex` for prose/labels, `MathTex` for
+  pure math; put Chinese inside `MathTex` only via `\text{...}`.
+- `Tex` for prose, `MathTex` for pure math. Do not wrap a whole sentence in `MathTex`.
+- Font size: use `font_size=` on `Text`/`Tex`/`MathTex`, not `.scale()` guesswork,
+  and keep it readable (typically 24-48).
+
+## Voiceover scene
+- The scene class must subclass `VoiceoverScene`.
+- Set the speech service exactly once in `construct`:
+  `self.set_speech_service(get_speech_service())`
+- Wrap every animated segment in `with self.voiceover(text="...") as tracker:` and
+  drive timing with `run_time=tracker.duration` where appropriate.
+- Do NOT call `self.wait()` with a negative or undefined duration.
+
+## Updaters / value trackers
+- `always_redraw(lambda: ...)` must return a fresh mobject each call.
+- Remove updaters you added (`mobj.clear_updaters()`) before `FadeOut` if they
+  reference objects that are being removed, to avoid `AttributeError` on None.
+
+## General
+- Import everything from manim: `from manim import *`.
+- Only reference colors that exist (e.g. `BLUE`, `RED`, `GREEN`, `YELLOW`, `WHITE`,
+  `GRAY`); do NOT invent color constants.
+- Every mobject you animate with `Transform`/`ReplacementTransform` must already be
+  constructed and, if needed, added to the scene.

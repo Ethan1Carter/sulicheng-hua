@@ -27,7 +27,7 @@ from src.core.parse_video import (
     image_with_most_non_black_space
 )
 from task_generator import get_banned_reasonings
-from task_generator.prompts_raw import (_code_font_size, _code_disable, _code_limit, _prompt_manim_cheatsheet)
+from task_generator.prompts_raw import (_code_font_size, _code_disable, _code_limit, _prompt_manim_cheatsheet, _code_common_errors)
 
 # Load allowed models list from JSON file
 allowed_models_path = os.path.join(os.path.dirname(__file__), 'src', 'utils', 'allowed_models.json')
@@ -365,7 +365,7 @@ class VideoGenerator:
                 scene_outline=scene_outline,
                 scene_implementation=scene_implementation,
                 scene_number=curr_scene,
-                additional_context=[_prompt_manim_cheatsheet, _code_font_size, _code_limit, _code_disable],
+                additional_context=[_prompt_manim_cheatsheet, _code_font_size, _code_limit, _code_disable, _code_common_errors],
                 scene_trace_id=scene_trace_id, # Use passed scene_trace_id
                 session_id=session_id,
                 rag_queries_cache=rag_queries_cache  # Pass the cache
@@ -394,7 +394,8 @@ class VideoGenerator:
                     banned_reasonings=self.banned_reasonings, # Pass banned reasonings
                     scene_trace_id=scene_trace_id,
                     topic=topic,
-                    session_id=session_id
+                    session_id=session_id,
+                    scene_model=self.code_generator.scene_model
                 )
                 if error_message is None: # Render success if error_message is None
                     break
